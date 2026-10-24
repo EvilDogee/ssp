@@ -1,11 +1,15 @@
-<xml>
-  <components>
-    <iframe srcdoc='<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>SSP Calendar</title>
+  
+  <!-- iOS Meta -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SSP Calendar">
+  
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body {
@@ -13,48 +17,71 @@
       user-select: none;
       -webkit-user-select: none;
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif;
+      background-color: #030712;
+    }
+    .glass-panel {
+      background: rgba(17, 24, 39, 0.7);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-card {
+      background: rgba(31, 41, 55, 0.5);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .glass-input {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.1);
     }
     @keyframes slideUp {
-      from { transform: translateY(100%); }
-      to { transform: translateY(0); }
+      from { transform: translateY(100%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
     }
     .animate-slide-up {
-      animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 antialiased min-h-screen">
-  <div id="app" class="max-w-md mx-auto min-h-screen flex flex-col pb-28 pt-4 px-4"></div>
+<body class="text-slate-100 antialiased min-h-screen selection:bg-blue-500 selection:text-white">
+  <div id="app" class="max-w-md mx-auto min-h-screen flex flex-col pb-28 pt-2 px-3"></div>
+
+  <!-- Modal Container -->
+  <div id="modal-container"></div>
 
   <script>
     let currentDate = new Date();
-    let activeTab = "calendar";
+    let activeTab = 'calendar';
     let showOffDutyOnGrid = true;
-    
-    let staff = JSON.parse(localStorage.getItem("ssp_staff")) || [
-      { id: "1", name: "Иван Иванов", weeklyLimit: 40, hourlyRate: 15 },
-      { id: "2", name: "Анна Смирнова", weeklyLimit: 35, hourlyRate: 16 }
-    ];
-
-    let requirements = JSON.parse(localStorage.getItem("ssp_reqs")) || { morning: 2, evening: 1 };
-    let shifts = JSON.parse(localStorage.getItem("ssp_shifts")) || {};
     let selectedDateStr = null;
 
+    // Local Storage Data
+    let staff = JSON.parse(localStorage.getItem('ssp_staff')) || [
+      { id: '1', name: 'Иван Иванов', weeklyLimit: 40, hourlyRate: 15 },
+      { id: '2', name: 'Анна Смирнова', weeklyLimit: 35, hourlyRate: 16 },
+      { id: '3', name: 'Алексей Петров', weeklyLimit: 40, hourlyRate: 14 }
+    ];
+
+    let requirements = JSON.parse(localStorage.getItem('ssp_reqs')) || { morning: 2, evening: 1 };
+    let shifts = JSON.parse(localStorage.getItem('ssp_shifts')) || {};
+
     function saveData() {
-      localStorage.setItem("ssp_staff", JSON.stringify(staff));
-      localStorage.setItem("ssp_reqs", JSON.stringify(requirements));
-      localStorage.setItem("ssp_shifts", JSON.stringify(shifts));
+      localStorage.setItem('ssp_staff', JSON.stringify(staff));
+      localStorage.setItem('ssp_reqs', JSON.stringify(requirements));
+      localStorage.setItem('ssp_shifts', JSON.stringify(shifts));
     }
 
+    // Calculation of Worked Hours
     function getStaffMonthlyHours() {
       const hours = {};
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth();
 
       Object.entries(shifts).forEach(([dateStr, dayShifts]) => {
-        const [dYear, dMonth] = dateStr.split("-").map(Number);
+        const [dYear, dMonth] = dateStr.split('-').map(Number);
         if (dYear === year && (dMonth - 1) === month) {
-          ["morning", "evening"].forEach(sType => {
+          ['morning', 'evening'].forEach(sType => {
             (dayShifts[sType] || []).forEach(empId => {
               hours[empId] = (hours[empId] || 0) + 8;
             });
@@ -64,35 +91,132 @@
       return hours;
     }
 
-    function getConflicts() {
-      const newConflicts = [];
+    // Extended Diagnostic Engine
+    function getDiagnostics() {
+      const errors = [];
       const staffHours = getStaffMonthlyHours();
 
-      Object.entries(shifts).forEach(([dateStr, dayShifts]) => {
-        ["morning", "evening"].forEach(shiftType => {
-          const assigned = dayShifts[shiftType] || [];
-          const req = requirements[shiftType] || 0;
+      const sortedDates = Object.keys(shifts).sort();
+
+      sortedDates.forEach((dateStr, idx) => {
+        const dayShifts = shifts[dateStr] || { morning: [], evening: [] };
+        
+        // 1. Shift requirement fulfillment
+        ['morning', 'evening'].forEach(sType => {
+          const assigned = dayShifts[sType] || [];
+          const req = requirements[sType] || 0;
           if (req > 0 && assigned.length < req) {
-            const shiftName = shiftType === "morning" ? "Утро" : "Вечер";
-            newConflicts.push(`${dateStr}: Нехватка на смене "${shiftName}" (требуется ${req}, назначено ${assigned.length})`);
+            const shiftTitle = sType === 'morning' ? 'Утренняя' : 'Вечерняя';
+            errors.push({
+              id: `req-${dateStr}-${sType}`,
+              type: 'coverage',
+              date: dateStr,
+              shiftType: sType,
+              title: `Нехватка персонала на смене`,
+              desc: `${dateStr} (${shiftTitle}): назначено ${assigned.length} из ${req} чел.`,
+              fixType: 'assign'
+            });
           }
         });
-      });
 
-      staff.forEach(emp => {
-        const workedHours = staffHours[emp.id] || 0;
-        const monthlyLimit = emp.weeklyLimit * 4;
-        if (workedHours > monthlyLimit) {
-          newConflicts.push(`${emp.name}: Превышен лимит (${workedHours}ч / ${monthlyLimit}ч в месяц)`);
+        // 2. Double shifts in one day
+        const morningAssigned = dayShifts.morning || [];
+        const eveningAssigned = dayShifts.evening || [];
+        morningAssigned.forEach(empId => {
+          if (eveningAssigned.includes(empId)) {
+            const emp = staff.find(s => s.id === empId);
+            errors.push({
+              id: `double-${dateStr}-${empId}`,
+              type: 'double_shift',
+              date: dateStr,
+              empId: empId,
+              title: `Двойная смена за 1 день`,
+              desc: `${emp ? emp.name : 'Сотрудник'} работает и Утром, и Вечером ${dateStr} (16 часов без перерыва).`,
+              fixType: 'remove_evening'
+            });
+          }
+        });
+
+        // 3. 12-Hour Rest Rule (Evening shift followed by Morning shift on next day)
+        if (idx > 0) {
+          const prevDateStr = sortedDates[idx - 1];
+          const prevDay = new Date(dateStr);
+          const checkPrevDate = new Date(prevDateStr);
+          const diffDays = Math.round((prevDay - checkPrevDate) / (1000 * 60 * 60 * 24));
+
+          if (diffDays === 1) {
+            const prevEvening = (shifts[prevDateStr] || {}).evening || [];
+            const currMorning = dayShifts.morning || [];
+
+            prevEvening.forEach(empId => {
+              if (currMorning.includes(empId)) {
+                const emp = staff.find(s => s.id === empId);
+                errors.push({
+                  id: `rest12-${dateStr}-${empId}`,
+                  type: 'rest_12h',
+                  date: dateStr,
+                  prevDate: prevDateStr,
+                  empId: empId,
+                  title: `Нарушение отдыха 12 часов`,
+                  desc: `${emp ? emp.name : 'Сотрудник'} закончил Вечером ${prevDateStr} и поставлен Утром ${dateStr}. Отдых меньше 12 часов!`,
+                  fixType: 'remove_morning'
+                });
+              }
+            });
+          }
         }
       });
 
-      return newConflicts;
+      // 4. Overtime & Hourly Cap Violations
+      staff.forEach(emp => {
+        const worked = staffHours[emp.id] || 0;
+        const maxMonthly = emp.weeklyLimit * 4;
+        if (worked > maxMonthly) {
+          errors.push({
+            id: `overtime-${emp.id}`,
+            type: 'overtime',
+            empId: emp.id,
+            title: `Превышение нормы часов`,
+            desc: `${emp.name}: отработано ${worked}ч из разрешенных ${maxMonthly}ч в месяц (Переработка: +${worked - maxMonthly}ч).`,
+            fixType: 'limit_info'
+          });
+        }
+      });
+
+      return errors;
+    }
+
+    // Auto-fix Actions
+    function resolveError(errId) {
+      const diagnostics = getDiagnostics();
+      const err = diagnostics.find(e => e.id === errId);
+      if (!err) return;
+
+      if (err.fixType === 'remove_morning' && err.date && err.empId) {
+        if (shifts[err.date] && shifts[err.date].morning) {
+          shifts[err.date].morning = shifts[err.date].morning.filter(id => id !== err.empId);
+        }
+      } else if (err.fixType === 'remove_evening' && err.date && err.empId) {
+        if (shifts[err.date] && shifts[err.date].evening) {
+          shifts[err.date].evening = shifts[err.date].evening.filter(id => id !== err.empId);
+        }
+      }
+      render();
+    }
+
+    function autoFixAll12hRestViolations() {
+      const diagnostics = getDiagnostics();
+      diagnostics.filter(e => e.type === 'rest_12h').forEach(err => {
+        if (shifts[err.date] && shifts[err.date].morning) {
+          shifts[err.date].morning = shifts[err.date].morning.filter(id => id !== err.empId);
+        }
+      });
+      render();
     }
 
     function render() {
       saveData();
-      const app = document.getElementById("app");
+      const app = document.getElementById('app');
       
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth();
@@ -105,13 +229,13 @@
       const days = [];
       for (let i = 0; i < startingDay; i++) days.push(null);
       for (let i = 1; i <= lastDay.getDate(); i++) {
-        const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(i).padStart(2, "0")}`;
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
         days.push({ dayNumber: i, dateStr });
       }
 
       let totalCost = 0;
       Object.values(shifts).forEach(dayShifts => {
-        ["morning", "evening"].forEach(sType => {
+        ['morning', 'evening'].forEach(sType => {
           (dayShifts[sType] || []).forEach(empId => {
             const emp = staff.find(s => s.id === empId);
             if (emp) totalCost += emp.hourlyRate * 8;
@@ -119,234 +243,443 @@
         });
       });
 
-      const conflicts = getConflicts();
+      const diagnostics = getDiagnostics();
       const staffHours = getStaffMonthlyHours();
 
       let content = `
-        <header class="flex justify-between items-center py-3 border-b border-slate-800/80 mb-4 backdrop-blur-md sticky top-0 bg-slate-950/80 z-30">
-          <div>
-            <div class="flex items-center gap-2">
-              <span class="text-xl">📅</span>
-              <h1 class="text-xl font-black tracking-tight text-blue-400">SSP Calendar</h1>
+        <!-- iOS 27 Dynamic Header -->
+        <header class="glass-panel rounded-3xl p-3.5 mb-3 sticky top-2 z-30 shadow-2xl">
+          <div class="flex justify-between items-center">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-lg shadow-lg shadow-blue-500/30">📅</div>
+              <div>
+                <h1 class="text-base font-black tracking-tight text-white">SSP Calendar</h1>
+                <p class="text-[10px] font-medium text-slate-400">iOS 27 Dynamic System</p>
+              </div>
             </div>
-            <p class="text-[11px] font-medium text-slate-400">Управление сменами iOS</p>
-          </div>
-          <div class="text-right bg-slate-900/60 border border-slate-800 px-3 py-1.5 rounded-2xl">
-            <div class="text-[10px] uppercase font-semibold text-slate-400">ФОТ Месяца</div>
-            <div class="text-base font-extrabold text-emerald-400">€${totalCost.toLocaleString()}</div>
+            <div class="text-right glass-card px-3 py-1.5 rounded-2xl border border-white/10">
+              <div class="text-[9px] uppercase font-bold text-slate-400 tracking-wider">ФОТ Месяца</div>
+              <div class="text-sm font-black text-emerald-400">€${totalCost.toLocaleString()}</div>
+            </div>
           </div>
         </header>
       `;
 
-      if (conflicts.length > 0 && activeTab === "calendar") {
+      // Diagnostic Warning Pill
+      if (diagnostics.length > 0 && activeTab === 'calendar') {
         content += `
-          <div class="mb-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl p-3 text-xs text-amber-300">
-            <div class="font-bold flex items-center gap-1.5 mb-1 text-amber-400"><span>⚠️</span> Замечания (${conflicts.length}):</div>
-            <ul class="space-y-1 max-h-20 overflow-y-auto text-[11px] pl-1">
-              ${conflicts.map(c => `<li>• ${c}</li>`).join("")}
-            </ul>
+          <div onclick="activeTab = 'diagnostics'; render();" class="mb-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl p-2.5 flex items-center justify-between cursor-pointer active:scale-98 transition shadow-lg">
+            <div class="flex items-center gap-2 text-xs font-bold text-amber-300">
+              <span>🚨</span>
+              <span>Обнаружено ${diagnostics.length} замечаний по часам/отдыху</span>
+            </div>
+            <span class="text-[10px] bg-amber-500/20 text-amber-200 px-2 py-0.5 rounded-lg font-bold">Обзор ›</span>
           </div>
         `;
       }
 
-      if (activeTab === "calendar") {
-        const monthName = currentDate.toLocaleString("ru", { month: "long", year: "numeric" });
+      if (activeTab === 'calendar') {
+        const monthName = currentDate.toLocaleString('ru', { month: 'long', year: 'numeric' });
         content += `
           <main class="space-y-3">
-            <div class="flex items-center justify-between bg-slate-900/80 border border-slate-800 rounded-2xl p-1.5">
-              <button onclick="changeMonth(-1)" class="w-9 h-9 flex items-center justify-center bg-slate-800 rounded-xl font-bold">‹</button>
-              <span class="font-bold text-sm text-slate-200 capitalize">${monthName}</span>
-              <button onclick="changeMonth(1)" class="w-9 h-9 flex items-center justify-center bg-slate-800 rounded-xl font-bold">›</button>
+            <!-- Calendar Navigation -->
+            <div class="glass-panel rounded-2xl p-1.5 flex items-center justify-between">
+              <button onclick="changeMonth(-1)" class="w-9 h-9 flex items-center justify-center glass-card rounded-xl font-bold text-slate-300 active:scale-90 transition">‹</button>
+              <span class="font-extrabold text-xs text-slate-200 capitalize tracking-wider">${monthName}</span>
+              <button onclick="changeMonth(1)" class="w-9 h-9 flex items-center justify-center glass-card rounded-xl font-bold text-slate-300 active:scale-90 transition">›</button>
             </div>
 
             <div class="flex justify-between items-center px-1">
-              <span class="text-[11px] text-slate-400">Календарь</span>
-              <button onclick="toggleOffDutyGrid()" class="text-[11px] font-semibold text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded-xl border border-blue-500/20">
-                ${showOffDutyOnGrid ? "☕ Выходные: Видны" : "☕ Выходные: Скрыты"}
+              <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Сетка месяца</span>
+              <button onclick="toggleOffDutyGrid()" class="text-[10px] font-bold text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded-xl border border-blue-500/20 active:scale-95 transition">
+                ${showOffDutyOnGrid ? '☕ Выходные: Видны' : '☕ Выходные: Скрыты'}
               </button>
             </div>
 
-            <div class="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-slate-500 py-1">
+            <!-- Days Headers -->
+            <div class="grid grid-cols-7 gap-1 text-center text-[10px] font-black text-slate-500 py-0.5">
               <span>ПН</span><span>ВТ</span><span>СР</span><span>ЧТ</span><span>ПТ</span><span>СБ</span><span>ВC</span>
             </div>
 
+            <!-- Calendar Days -->
             <div class="grid grid-cols-7 gap-1.5">
               ${days.map(d => {
-                if (!d) return `<div class="h-24 rounded-2xl bg-slate-900/20"></div>`;
+                if (!d) return `<div class="h-24 rounded-2xl bg-slate-900/10 border border-white/5"></div>`;
                 const dayShift = shifts[d.dateStr] || { morning: [], evening: [] };
                 const morningCount = (dayShift.morning || []).length;
                 const eveningCount = (dayShift.evening || []).length;
                 const reqM = requirements.morning || 0;
                 const reqE = requirements.evening || 0;
-                const hasIssue = (reqM > 0 && morningCount < reqM) || (reqE > 0 && eveningCount < reqE);
+
+                const dayIssues = diagnostics.filter(e => e.date === d.dateStr);
+                const hasIssue = dayIssues.length > 0;
 
                 const workingIds = [...(dayShift.morning || []), ...(dayShift.evening || [])];
                 const offStaff = staff.filter(s => !workingIds.includes(s.id));
 
                 return `
-                  <div onclick="selectDate('${d.dateStr}')" class="h-24 bg-slate-900/60 border ${hasIssue ? "border-amber-500/40 bg-amber-500/5" : "border-slate-800"} rounded-2xl p-1.5 flex flex-col justify-between cursor-pointer active:scale-95 transition">
+                  <div onclick="selectDate('${d.dateStr}')" class="h-24 glass-card ${hasIssue ? 'border-amber-500/50 bg-amber-500/5' : 'border-white/5'} hover:border-blue-500/40 rounded-2xl p-1.5 flex flex-col justify-between cursor-pointer active:scale-95 transition relative overflow-hidden">
                     <div class="flex justify-between items-center">
-                      <span class="text-xs font-black ${hasIssue ? "text-amber-400" : "text-slate-200"}">${d.dayNumber}</span>
-                      ${hasIssue ? `<span class="text-[9px]">⚠️</span>` : ""}
+                      <span class="text-xs font-black ${hasIssue ? 'text-amber-400' : 'text-slate-200'}">${d.dayNumber}</span>
+                      ${hasIssue ? `<span class="text-[8px] bg-amber-500/20 text-amber-300 font-bold px-1 rounded">⚠️</span>` : ''}
                     </div>
+
                     <div class="space-y-1 my-auto">
-                      ${reqM > 0 ? `<div class="text-[9px] px-1 py-0.5 rounded flex justify-between ${morningCount >= reqM ? "bg-amber-500/15 text-amber-300" : "bg-red-500/15 text-red-300"}"><span>Утр</span><b>${morningCount}/${reqM}</b></div>` : ""}
-                      ${reqE > 0 ? `<div class="text-[9px] px-1 py-0.5 rounded flex justify-between ${eveningCount >= reqE ? "bg-indigo-500/15 text-indigo-300" : "bg-red-500/15 text-red-300"}"><span>Веч</span><b>${eveningCount}/${reqE}</b></div>` : ""}
+                      ${reqM > 0 ? `
+                        <div class="text-[8px] font-bold px-1 py-0.5 rounded-md flex justify-between items-center ${morningCount >= reqM ? 'bg-amber-500/20 text-amber-300' : 'bg-red-500/20 text-red-300'}">
+                          <span>Утр</span><b>${morningCount}/${reqM}</b>
+                        </div>
+                      ` : ''}
+                      ${reqE > 0 ? `
+                        <div class="text-[8px] font-bold px-1 py-0.5 rounded-md flex justify-between items-center ${eveningCount >= reqE ? 'bg-indigo-500/20 text-indigo-300' : 'bg-red-500/20 text-red-300'}">
+                          <span>Веч</span><b>${eveningCount}/${reqE}</b>
+                        </div>
+                      ` : ''}
                     </div>
-                    ${showOffDutyOnGrid ? `<div class="text-[8px] text-slate-400 truncate bg-slate-950 px-1 py-0.5 rounded">☕ ${offStaff.length ? offStaff.map(s => s.name.split(" ")[0]).join(", ") : "Никого"}</div>` : ""}
+
+                    ${showOffDutyOnGrid ? `
+                      <div class="text-[7px] font-medium text-slate-400 truncate bg-slate-950/80 px-1 py-0.5 rounded-md border border-white/5">
+                        ☕ ${offStaff.length > 0 ? offStaff.map(s => s.name.split(' ')[0]).join(', ') : 'Все в работе'}
+                      </div>
+                    ` : ''}
                   </div>
                 `;
-              }).join("")}
+              }).join('')}
             </div>
           </main>
         `;
-      } else if (activeTab === "staff") {
+      } else if (activeTab === 'diagnostics') {
         content += `
-          <main class="space-y-4">
-            <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-4 space-y-3">
-              <h3 class="font-bold text-sm">Требования к сменам</h3>
-              <div class="grid grid-cols-2 gap-3">
-                <div class="bg-slate-950 p-3 rounded-2xl text-center">
-                  <label class="text-[11px] text-amber-300 block mb-1">Утро</label>
-                  <div class="flex justify-center gap-2 items-center">
-                    <button onclick="updateReq('morning', Math.max(0, requirements.morning - 1))" class="w-8 h-8 bg-slate-800 rounded-xl font-bold">-</button>
-                    <span class="font-extrabold">${requirements.morning}</span>
-                    <button onclick="updateReq('morning', requirements.morning + 1)" class="w-8 h-8 bg-slate-800 rounded-xl font-bold">+</button>
+          <main class="space-y-3">
+            <div class="glass-panel rounded-3xl p-4 space-y-2">
+              <div class="flex justify-between items-center">
+                <h3 class="font-extrabold text-sm text-slate-100 flex items-center gap-1.5">
+                  <span>🚨</span> Центр диагностики и исправлений
+                </h3>
+                <span class="text-xs font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full">${diagnostics.length}</span>
+              </div>
+              <p class="text-[11px] text-slate-400">Автоматический аудит соблюдения 12-часового отдыха, сменных норм и переработок.</p>
+              
+              ${diagnostics.some(e => e.type === 'rest_12h') ? `
+                <button onclick="autoFixAll12hRestViolations()" class="w-full mt-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold text-xs py-2.5 rounded-xl shadow-lg shadow-amber-600/20 active:scale-95 transition">
+                  ⚡ Исправить все нарушения 12ч отдыха в 1 клик
+                </button>
+              ` : ''}
+            </div>
+
+            <div class="space-y-2">
+              ${diagnostics.length === 0 ? `
+                <div class="glass-card rounded-3xl p-6 text-center space-y-2">
+                  <div class="text-3xl">✅</div>
+                  <h4 class="font-bold text-sm text-emerald-400">Нарушений не обнаружено</h4>
+                  <p class="text-xs text-slate-400">Все смены распределены с соблюдением 12-часового отдыха и часов сотрудников.</p>
+                </div>
+              ` : diagnostics.map(err => `
+                <div class="glass-card rounded-2xl p-3 space-y-2 border-l-4 ${err.type === 'rest_12h' ? 'border-l-red-500' : 'border-l-amber-500'}">
+                  <div class="flex justify-between items-start">
+                    <h4 class="font-bold text-xs text-slate-200">${err.title}</h4>
+                    <span class="text-[9px] font-bold uppercase tracking-wider text-slate-400">${err.date || 'Месяц'}</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed">${err.desc}</p>
+                  
+                  <div class="pt-1 flex justify-end gap-2">
+                    ${err.fixType === 'remove_morning' ? `
+                      <button onclick="resolveError('${err.id}')" class="text-[10px] font-bold bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 px-3 py-1.5 rounded-xl active:scale-95 transition">
+                        ✂️ Снять с утренней смены
+                      </button>
+                    ` : err.fixType === 'remove_evening' ? `
+                      <button onclick="resolveError('${err.id}')" class="text-[10px] font-bold bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 px-3 py-1.5 rounded-xl active:scale-95 transition">
+                        ✂️ Снять с вечерней смены
+                      </button>
+                    ` : ''}
                   </div>
                 </div>
-                <div class="bg-slate-950 p-3 rounded-2xl text-center">
-                  <label class="text-[11px] text-indigo-300 block mb-1">Вечер</label>
-                  <div class="flex justify-center gap-2 items-center">
-                    <button onclick="updateReq('evening', Math.max(0, requirements.evening - 1))" class="w-8 h-8 bg-slate-800 rounded-xl font-bold">-</button>
-                    <span class="font-extrabold">${requirements.evening}</span>
-                    <button onclick="updateReq('evening', requirements.evening + 1)" class="w-8 h-8 bg-slate-800 rounded-xl font-bold">+</button>
+              `).join('')}
+            </div>
+          </main>
+        `;
+      } else if (activeTab === 'staff') {
+        content += `
+          <main class="space-y-3">
+            <!-- Shift Requirements -->
+            <div class="glass-panel rounded-3xl p-3.5 space-y-3">
+              <h3 class="font-bold text-xs uppercase tracking-wider text-slate-300">Нормативы смен</h3>
+              <div class="grid grid-cols-2 gap-2">
+                <div class="glass-card p-2.5 rounded-2xl text-center">
+                  <span class="text-[10px] text-amber-300 font-bold block mb-1">Утро (чел)</span>
+                  <div class="flex items-center justify-center gap-3">
+                    <button onclick="updateReq('morning', Math.max(0, requirements.morning - 1))" class="w-7 h-7 rounded-lg glass-card font-bold">-</button>
+                    <span class="font-extrabold text-sm">${requirements.morning}</span>
+                    <button onclick="updateReq('morning', requirements.morning + 1)" class="w-7 h-7 rounded-lg glass-card font-bold">+</button>
+                  </div>
+                </div>
+                <div class="glass-card p-2.5 rounded-2xl text-center">
+                  <span class="text-[10px] text-indigo-300 font-bold block mb-1">Вечер (чел)</span>
+                  <div class="flex items-center justify-center gap-3">
+                    <button onclick="updateReq('evening', Math.max(0, requirements.evening - 1))" class="w-7 h-7 rounded-lg glass-card font-bold">-</button>
+                    <span class="font-extrabold text-sm">${requirements.evening}</span>
+                    <button onclick="updateReq('evening', requirements.evening + 1)" class="w-7 h-7 rounded-lg glass-card font-bold">+</button>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div class="space-y-3">
+            <!-- Staff List -->
+            <div class="space-y-2">
               <div class="flex justify-between items-center px-1">
-                <h3 class="font-bold text-sm">Персонал</h3>
-                <button onclick="addStaff()" class="text-xs bg-blue-600 px-3 py-1.5 rounded-xl font-bold">+ Добавить</button>
+                <h3 class="font-bold text-xs uppercase tracking-wider text-slate-300">Сотрудники (${staff.length})</h3>
+                <button onclick="openStaffModal()" class="text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold px-3 py-1.5 rounded-xl shadow-lg shadow-blue-600/30 active:scale-95 transition">
+                  + Добавить
+                </button>
               </div>
-              ${staff.map((emp, i) => {
+
+              ${staff.map((emp) => {
                 const workedHours = staffHours[emp.id] || 0;
                 const maxMonthly = emp.weeklyLimit * 4;
                 const isOverLimit = workedHours > maxMonthly;
+
                 return `
-                  <div class="bg-slate-900/60 border ${isOverLimit ? "border-red-500/50" : "border-slate-800"} rounded-3xl p-3.5 space-y-3">
-                    <div class="flex gap-2">
-                      <input type="text" value="${emp.name}" onchange="updateStaff(${i}, 'name', this.value)" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm font-semibold"/>
-                      <button onclick="removeStaff(${i})" class="w-9 h-9 bg-red-500/10 text-red-400 rounded-xl font-bold">✕</button>
-                    </div>
-                    <div class="bg-slate-950 p-2.5 rounded-2xl flex justify-between items-center text-xs">
+                  <div class="glass-panel rounded-2xl p-3 space-y-2.5 border ${isOverLimit ? 'border-red-500/40 bg-red-500/5' : 'border-white/5'}">
+                    <div class="flex justify-between items-center">
                       <div>
-                        <span class="text-[10px] text-slate-400">Отработано в месяце:</span>
-                        <b class="${isOverLimit ? "text-red-400" : "text-slate-200"}">${workedHours}ч / ${maxMonthly}ч</b>
+                        <h4 class="font-bold text-sm text-slate-100">${emp.name}</h4>
+                        <span class="text-[10px] text-slate-400">${emp.weeklyLimit}ч в неделю (€${emp.hourlyRate}/ч)</span>
                       </div>
-                      <span class="text-[10px] font-bold ${isOverLimit ? "text-red-400 bg-red-500/10 px-2 py-1 rounded" : "text-emerald-400"}">
-                        ${isOverLimit ? `Превышение на ${workedHours - maxMonthly}ч` : "Норма"}
-                      </span>
+                      <div class="flex items-center gap-1.5">
+                        <button onclick="openStaffModal('${emp.id}')" class="text-xs glass-card hover:bg-white/10 text-blue-300 px-2.5 py-1.5 rounded-xl font-bold active:scale-90 transition">✏️ Edit</button>
+                        <button onclick="removeStaff('${emp.id}')" class="text-xs glass-card hover:bg-red-500/20 text-red-400 px-2.5 py-1.5 rounded-xl font-bold active:scale-90 transition">✕</button>
+                      </div>
                     </div>
-                    <div class="grid grid-cols-2 gap-2 text-xs">
-                      <div class="bg-slate-950 p-2 rounded-xl">
-                        <span class="text-[10px] text-slate-400">Лимит (ч/нед)</span>
-                        <input type="number" value="${emp.weeklyLimit}" onchange="updateStaff(${i}, 'weeklyLimit', this.value)" class="w-full bg-slate-900 border border-slate-800 rounded p-1 mt-1 text-center font-bold"/>
+
+                    <div class="glass-card p-2 rounded-xl flex justify-between items-center text-xs">
+                      <div>
+                        <span class="text-[9px] text-slate-400 block font-medium">Отработано в месяце</span>
+                        <span class="font-bold ${isOverLimit ? 'text-red-400' : 'text-slate-200'}">${workedHours}ч / ${maxMonthly}ч</span>
                       </div>
-                      <div class="bg-slate-950 p-2 rounded-xl">
-                        <span class="text-[10px] text-slate-400">Ставка (€/ч)</span>
-                        <input type="number" value="${emp.hourlyRate}" onchange="updateStaff(${i}, 'hourlyRate', this.value)" class="w-full bg-slate-900 border border-slate-800 rounded p-1 mt-1 text-center font-bold text-emerald-400"/>
-                      </div>
+                      <span class="text-[9px] font-bold px-2 py-1 rounded-lg ${isOverLimit ? 'bg-red-500/20 text-red-300 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-300'}">
+                        ${isOverLimit ? `Превышение на ${workedHours - maxMonthly}ч` : 'В норме'}
+                      </span>
                     </div>
                   </div>
                 `;
-              }).join("")}
+              }).join('')}
             </div>
           </main>
         `;
-      } else if (activeTab === "auto") {
+      } else if (activeTab === 'auto') {
         content += `
-          <main class="space-y-4 text-center py-6">
-            <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 space-y-4">
-              <div class="text-3xl">⚡</div>
-              <h3 class="font-bold text-base">Умный ИИ Автогенератор</h3>
-              <p class="text-xs text-slate-400 text-left bg-slate-950 p-3 rounded-2xl">
-                • <b>Максимум 8 дней подряд:</b> Контроль непрерывной работы.<br/>
-                • <b>Циклы отдыха:</b> Авто-распределение с учетом отдыха (7/2 и 8/4).
-              </p>
-              <button onclick="autoScheduleWithRestRules()" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-2xl font-bold text-sm">
-                Заполнить график с учетом отдыха
+          <main class="space-y-3 py-3">
+            <div class="glass-panel rounded-3xl p-5 space-y-4 text-center">
+              <div class="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-500 rounded-2xl flex items-center justify-center text-2xl mx-auto shadow-xl shadow-blue-500/20">⚡</div>
+              <div>
+                <h3 class="font-bold text-base text-slate-100">ИИ Максимизатор Часов</h3>
+                <p class="text-xs text-slate-400 mt-1 leading-relaxed">Заполняет весь месяц с максимизацией загрузки сотрудников до их нормы.</p>
+              </div>
+
+              <div class="glass-card rounded-2xl p-3 text-left space-y-2 text-[11px] text-slate-300">
+                <div class="font-bold text-blue-400">Правила генерации ИИ:</div>
+                <div class="flex items-start gap-1.5">
+                  <span>🎯</span> <span><b>Максимизация часов:</b> Приоритет сотрудникам с наибольшим остатком лимита часов.</span>
+                </div>
+                <div class="flex items-start gap-1.5">
+                  <span>🛑</span> <span><b>Отдых 12 часов:</b> Исключено назначение Утром после Вечерней смены предыдущего дня.</span>
+                </div>
+                <div class="flex items-start gap-1.5">
+                  <span>📅</span> <span><b>Максимум 8 дней подряд:</b> Обязательный блок отдыха после 8 рабочих дней.</span>
+                </div>
+              </div>
+
+              <button onclick="autoScheduleMaximizeHours()" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white py-3 rounded-2xl font-bold text-xs shadow-xl shadow-blue-600/30 active:scale-98 transition">
+                Заполнить месяц с максимальной загрузкой
               </button>
             </div>
           </main>
         `;
       }
 
+      <!-- Bottom Sheet Modal for Shift Selection -->
       if (selectedDateStr) {
         const dayObj = shifts[selectedDateStr] || { morning: [], evening: [] };
         const workingIds = [...(dayObj.morning || []), ...(dayObj.evening || [])];
         const offStaff = staff.filter(s => !workingIds.includes(s.id));
 
         content += `
-          <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-end justify-center z-50">
-            <div class="bg-slate-900 border-t border-slate-800 w-full max-w-md rounded-t-[32px] p-5 space-y-4 animate-slide-up max-h-[85vh] overflow-y-auto">
-              <div class="flex justify-between items-center border-b border-slate-800 pb-3">
-                <h3 class="font-bold text-base">Смены на ${selectedDateStr}</h3>
-                <button onclick="selectedDateStr = null; render();" class="w-8 h-8 bg-slate-800 rounded-full font-bold">✕</button>
-              </div>
-              <div class="bg-slate-950 p-3 rounded-2xl text-xs">
-                <b>☕ Выходные (${offStaff.length}):</b> ${offStaff.length ? offStaff.map(s => s.name).join(", ") : "Все работают"}
-              </div>
-              ${["morning", "evening"].map(sType => `
-                <div class="space-y-2">
-                  <div class="text-xs font-bold text-slate-400 uppercase">${sType === "morning" ? "Утро" : "Вечер"}</div>
-                  <div class="grid grid-cols-2 gap-2">
-                    ${staff.map(s => {
-                      const isAssigned = (dayObj[sType] || []).includes(s.id);
-                      return `
-                        <button onclick="toggleShift('${selectedDateStr}', '${sType}', '${s.id}')" class="p-2.5 rounded-2xl text-xs flex justify-between border ${isAssigned ? "bg-blue-600/20 border-blue-500 text-blue-200" : "bg-slate-950 border-slate-800 text-slate-400"}">
-                          <span>${s.name}</span><b>${isAssigned ? "✓" : ""}</b>
-                        </button>
-                      `;
-                    }).join("")}
-                  </div>
+          <div class="fixed inset-0 bg-black/80 backdrop-blur-md flex items-end justify-center z-50">
+            <div class="glass-panel w-full max-w-md rounded-t-[32px] p-4 space-y-3 animate-slide-up max-h-[85vh] overflow-y-auto">
+              <div class="flex justify-between items-center border-b border-white/10 pb-2.5">
+                <div>
+                  <h3 class="font-extrabold text-sm text-slate-100">Настройка смен</h3>
+                  <p class="text-[10px] text-slate-400">${selectedDateStr}</p>
                 </div>
-              `).join("")}
+                <button onclick="selectedDateStr = null; render();" class="w-7 h-7 glass-card rounded-full font-bold flex items-center justify-center text-xs">✕</button>
+              </div>
+
+              <div class="glass-card rounded-xl p-2.5">
+                <div class="text-[10px] font-bold text-slate-400 mb-0.5">☕ Отдыхают сегодня:</div>
+                <p class="text-xs text-slate-300 font-medium">${offStaff.length > 0 ? offStaff.map(s => s.name).join(', ') : 'Все работают'}</p>
+              </div>
+
+              ${['morning', 'evening'].map(sType => {
+                const req = requirements[sType] || 0;
+                const assigned = dayObj[sType] || [];
+                const title = sType === 'morning' ? 'Утреннее время' : 'Вечернее время';
+
+                return `
+                  <div class="space-y-1.5">
+                    <div class="flex justify-between items-center text-xs">
+                      <span class="font-bold ${sType === 'morning' ? 'text-amber-300' : 'text-indigo-300'}">${title}</span>
+                      <span class="text-[10px] font-bold text-slate-400">${assigned.length} из ${req} чел.</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-1.5">
+                      ${staff.map(s => {
+                        const isAssigned = assigned.includes(s.id);
+                        return `
+                          <button onclick="toggleShift('${selectedDateStr}', '${sType}', '${s.id}')" class="p-2 rounded-xl text-xs flex items-center justify-between border transition active:scale-95 ${isAssigned ? 'bg-blue-600/30 border-blue-400 text-blue-100 font-bold' : 'glass-card border-white/5 text-slate-400'}">
+                            <span class="truncate">${s.name}</span>
+                            <span>${isAssigned ? '✓' : ''}</span>
+                          </button>
+                        `;
+                      }).join('')}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
             </div>
           </div>
         `;
       }
 
+      <!-- Dynamic iOS 27 Tab Navigation -->
       content += `
-        <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-950/90 backdrop-blur border-t border-slate-800 px-6 py-3 flex justify-around items-center z-40 pb-7">
-          <button onclick="activeTab = 'calendar'; render();" class="text-xs font-bold ${activeTab === "calendar" ? "text-blue-400" : "text-slate-500"}">📅 Календарь</button>
-          <button onclick="activeTab = 'staff'; render();" class="text-xs font-bold ${activeTab === "staff" ? "text-blue-400" : "text-slate-500"}">👥 Персонал</button>
-          <button onclick="activeTab = 'auto'; render();" class="text-xs font-bold ${activeTab === "auto" ? "text-blue-400" : "text-slate-500"}">⚡ Авто-ИИ</button>
+        <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto glass-panel border-t border-white/10 px-4 py-2.5 flex justify-around items-center z-40 pb-6">
+          <button onclick="activeTab = 'calendar'; render();" class="flex flex-col items-center gap-1 text-[10px] font-bold transition active:scale-90 ${activeTab === 'calendar' ? 'text-blue-400' : 'text-slate-500'}">
+            <span class="text-base">📅</span> Календарь
+          </button>
+          <button onclick="activeTab = 'diagnostics'; render();" class="flex flex-col items-center gap-1 text-[10px] font-bold transition active:scale-90 ${activeTab === 'diagnostics' ? 'text-amber-400' : 'text-slate-500'} relative">
+            <span class="text-base">🚨</span> Ошибки
+            ${diagnostics.length > 0 ? `<span class="absolute -top-1 right-2 w-2 h-2 bg-amber-400 rounded-full"></span>` : ''}
+          </button>
+          <button onclick="activeTab = 'staff'; render();" class="flex flex-col items-center gap-1 text-[10px] font-bold transition active:scale-90 ${activeTab === 'staff' ? 'text-blue-400' : 'text-slate-500'}">
+            <span class="text-base">👥</span> Персонал
+          </button>
+          <button onclick="activeTab = 'auto'; render();" class="flex flex-col items-center gap-1 text-[10px] font-bold transition active:scale-90 ${activeTab === 'auto' ? 'text-blue-400' : 'text-slate-500'}">
+            <span class="text-base">⚡</span> ИИ-Часы
+          </button>
         </nav>
       `;
 
       app.innerHTML = content;
     }
 
+    // Modal UI Handlers for Adding & Editing Staff
+    function openStaffModal(empId = null) {
+      const modalContainer = document.getElementById('modal-container');
+      const emp = staff.find(s => s.id === empId) || { name: '', weeklyLimit: 40, hourlyRate: 15 };
+      const isEdit = !!empId;
+
+      modalContainer.innerHTML = `
+        <div class="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 px-4">
+          <div class="glass-panel w-full max-w-sm rounded-3xl p-5 space-y-4 animate-slide-up shadow-2xl border border-white/10">
+            <div class="flex justify-between items-center">
+              <h3 class="font-bold text-sm text-slate-100">${isEdit ? 'Редактировать сотрудника' : 'Добавить сотрудника'}</h3>
+              <button onclick="closeStaffModal()" class="w-7 h-7 glass-card rounded-full font-bold flex items-center justify-center text-xs">✕</button>
+            </div>
+
+            <div class="space-y-3 text-xs">
+              <div>
+                <label class="text-[10px] text-slate-400 font-bold block mb-1">ФИО / Имя</label>
+                <input type="text" id="staff-name-input" value="${emp.name}" placeholder="например, Иван Иванов" class="w-full glass-input rounded-xl p-2.5 text-slate-100 font-semibold focus:outline-none focus:border-blue-500"/>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="text-[10px] text-slate-400 font-bold block mb-1">Лимит (ч/нед)</label>
+                  <input type="number" id="staff-limit-input" value="${emp.weeklyLimit}" class="w-full glass-input rounded-xl p-2.5 text-slate-100 font-bold text-center focus:outline-none focus:border-blue-500"/>
+                </div>
+                <div>
+                  <label class="text-[10px] text-slate-400 font-bold block mb-1">Ставка (€/ч)</label>
+                  <input type="number" id="staff-rate-input" value="${emp.hourlyRate}" class="w-full glass-input rounded-xl p-2.5 text-emerald-400 font-bold text-center focus:outline-none focus:border-blue-500"/>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex gap-2 pt-2">
+              <button onclick="closeStaffModal()" class="flex-1 glass-card py-2.5 rounded-xl font-bold text-xs text-slate-400 active:scale-95 transition">Отмена</button>
+              <button onclick="saveStaffModal('${empId || ''}')" class="flex-1 bg-blue-600 hover:bg-blue-500 py-2.5 rounded-xl font-bold text-xs text-white shadow-lg shadow-blue-600/30 active:scale-95 transition">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function closeStaffModal() {
+      document.getElementById('modal-container').innerHTML = '';
+    }
+
+    function saveStaffModal(empId) {
+      const name = document.getElementById('staff-name-input').value.trim();
+      const limit = parseFloat(document.getElementById('staff-limit-input').value) || 40;
+      const rate = parseFloat(document.getElementById('staff-rate-input').value) || 15;
+
+      if (!name) return;
+
+      if (empId) {
+        const emp = staff.find(s => s.id === empId);
+        if (emp) {
+          emp.name = name;
+          emp.weeklyLimit = limit;
+          emp.hourlyRate = rate;
+        }
+      } else {
+        staff.push({
+          id: Date.now().toString(),
+          name: name,
+          weeklyLimit: limit,
+          hourlyRate: rate
+        });
+      }
+
+      closeStaffModal();
+      render();
+    }
+
     function changeMonth(delta) {
       currentDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + delta, 1);
       render();
     }
-    function toggleOffDutyGrid() { showOffDutyOnGrid = !showOffDutyOnGrid; render(); }
-    function selectDate(dateStr) { selectedDateStr = dateStr; render(); }
+
+    function toggleOffDutyGrid() {
+      showOffDutyOnGrid = !showOffDutyOnGrid;
+      render();
+    }
+
+    function selectDate(dateStr) {
+      selectedDateStr = dateStr;
+      render();
+    }
+
     function toggleShift(dateStr, sType, empId) {
       if (!shifts[dateStr]) shifts[dateStr] = { morning: [], evening: [] };
       const list = shifts[dateStr][sType] || [];
-      shifts[dateStr][sType] = list.includes(empId) ? list.filter(id => id !== empId) : [...list, empId];
+      if (list.includes(empId)) {
+        shifts[dateStr][sType] = list.filter(id => id !== empId);
+      } else {
+        shifts[dateStr][sType] = [...list, empId];
+      }
       render();
     }
-    function updateReq(type, val) { requirements[type] = parseInt(val) || 0; render(); }
-    function addStaff() { staff.push({ id: Date.now().toString(), name: "Новый сотрудник", weeklyLimit: 40, hourlyRate: 15 }); render(); }
-    function updateStaff(i, field, val) { staff[i][field] = field === "name" ? val : parseFloat(val) || 0; render(); }
-    function removeStaff(i) { staff.splice(i, 1); render(); }
 
-    function autoScheduleWithRestRules() {
+    function updateReq(type, val) {
+      requirements[type] = parseInt(val) || 0;
+      render();
+    }
+
+    function removeStaff(empId) {
+      staff = staff.filter(s => s.id !== empId);
+      render();
+    }
+
+    // AI Max Hours Scheduler Engine
+    function autoScheduleMaximizeHours() {
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth();
       const daysCount = new Date(year, month + 1, 0).getDate();
@@ -363,15 +696,37 @@
       });
 
       for (let day = 1; day <= daysCount; day++) {
-        const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const prevDateStr = day > 1 ? `${year}-${String(month + 1).padStart(2, '0')}-${String(day - 1).padStart(2, '0')}` : null;
+        
         newShifts[dateStr] = { morning: [], evening: [] };
 
         const assignToShift = (shiftType, reqCount) => {
           for (let r = 0; r < reqCount; r++) {
-            const candidate = staff.find(emp => {
+            // Sort staff by remaining available hours to maximize usage
+            const candidates = [...staff].sort((a, b) => {
+              const remA = (a.weeklyLimit * 4) - (totalHoursWorked[a.id] || 0);
+              const remB = (b.weeklyLimit * 4) - (totalHoursWorked[b.id] || 0);
+              return remB - remA;
+            });
+
+            const candidate = candidates.find(emp => {
               const maxMonthly = emp.weeklyLimit * 4;
-              const alreadyAssigned = newShifts[dateStr].morning.includes(emp.id) || newShifts[dateStr].evening.includes(emp.id);
-              return !alreadyAssigned && day >= forceRestUntil[emp.id] && consecutiveWorkedDays[emp.id] < 8 && (totalHoursWorked[emp.id] + 8) <= maxMonthly;
+              const alreadyAssignedToday = newShifts[dateStr].morning.includes(emp.id) || newShifts[dateStr].evening.includes(emp.id);
+              const isResting = day < forceRestUntil[emp.id];
+              const isOver8Days = consecutiveWorkedDays[emp.id] >= 8;
+              const isHoursExceeded = (totalHoursWorked[emp.id] + 8) > maxMonthly;
+
+              // 12-Hour Rest Check: Evening yesterday -> Morning today forbidden
+              let rest12Violated = false;
+              if (shiftType === 'morning' && prevDateStr && newShifts[prevDateStr]) {
+                const prevEvening = newShifts[prevDateStr].evening || [];
+                if (prevEvening.includes(emp.id)) {
+                  rest12Violated = true;
+                }
+              }
+
+              return !alreadyAssignedToday && !isResting && !isOver8Days && !isHoursExceeded && !rest12Violated;
             });
 
             if (candidate) {
@@ -379,37 +734,32 @@
               consecutiveWorkedDays[candidate.id] += 1;
               totalHoursWorked[candidate.id] += 8;
 
-              if (candidate.weeklyLimit >= 40) {
-                if (consecutiveWorkedDays[candidate.id] === 7) {
-                  forceRestUntil[candidate.id] = day + 3;
-                  consecutiveWorkedDays[candidate.id] = 0;
-                } else if (consecutiveWorkedDays[candidate.id] === 8) {
-                  forceRestUntil[candidate.id] = day + 5;
-                  consecutiveWorkedDays[candidate.id] = 0;
-                }
+              if (consecutiveWorkedDays[candidate.id] >= 8) {
+                forceRestUntil[candidate.id] = day + 3;
+                consecutiveWorkedDays[candidate.id] = 0;
               }
             }
           }
         };
 
-        assignToShift("morning", requirements.morning || 0);
-        assignToShift("evening", requirements.evening || 0);
+        assignToShift('morning', requirements.morning || 0);
+        assignToShift('evening', requirements.evening || 0);
 
         staff.forEach(emp => {
-          if (!newShifts[dateStr].morning.includes(emp.id) && !newShifts[dateStr].evening.includes(emp.id)) {
+          const workedToday = newShifts[dateStr].morning.includes(emp.id) || newShifts[dateStr].evening.includes(emp.id);
+          if (!workedToday) {
             consecutiveWorkedDays[emp.id] = 0;
           }
         });
       }
 
       shifts = newShifts;
-      activeTab = "calendar";
+      activeTab = 'calendar';
       render();
     }
 
     render();
   </script>
 </body>
-</html>' style="width: 100%; height: 680px; border: none; border-radius: 24px; background: #020617;"></iframe>
-  </components>
-</xml>
+</html>
+
