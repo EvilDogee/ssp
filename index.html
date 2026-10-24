@@ -5,347 +5,294 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>SSP Calendar</title>
   
-  <!-- iOS PWA Meta Tags -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="SSP Calendar">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="https://img.icons8.com/isometric-folders/180/calendar.png">
   
-  <!-- Tailwind CSS & React React-DOM Babel -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://unpkg.com/lucide-react@0.263.1/dist/umd/lucide-react.min.js"></script>
-
   <style>
     body {
       -webkit-tap-highlight-color: transparent;
       user-select: none;
       -webkit-user-select: none;
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif;
     }
   </style>
 </head>
 <body class="bg-slate-900 text-white antialiased min-h-screen">
-  <div id="root"></div>
+  <div id="app" class="max-w-md mx-auto min-h-screen flex flex-col pb-24 pt-4 px-4"></div>
 
-  <script type="text/babel">
-    const { useState, useEffect } = React;
-    const { Calendar, Users, Sliders, ChevronLeft, ChevronRight, AlertCircle, RefreshCw, Plus, Trash2, CheckCircle2, Share2, Info } = lucide;
+  <script>
+    let currentDate = new Date();
+    let activeTab = 'calendar';
+    
+    let staff = JSON.parse(localStorage.getItem('ssp_staff')) || [
+      { id: '1', name: 'Иван Иванов', weeklyLimit: 40, hourlyRate: 15 },
+      { id: '2', name: 'Анна Смирнова', weeklyLimit: 35, hourlyRate: 16 }
+    ];
 
-    function SSPCalendarApp() {
-      const [currentDate, setCurrentDate] = useState(new Date());
-      const [activeTab, setActiveTab] = useState('calendar');
+    let requirements = JSON.parse(localStorage.getItem('ssp_reqs')) || { morning: 2, evening: 1 };
+    let shifts = JSON.parse(localStorage.getItem('ssp_shifts')) || {};
+    let selectedDateStr = null;
+
+    function saveData() {
+      localStorage.setItem('ssp_staff', JSON.stringify(staff));
+      localStorage.setItem('ssp_reqs', JSON.stringify(requirements));
+      localStorage.setItem('ssp_shifts', JSON.stringify(shifts));
+    }
+
+    function render() {
+      saveData();
+      const app = document.getElementById('app');
       
-      const [staff, setStaff] = useState(() => {
-        const saved = localStorage.getItem('ssp_staff');
-        return saved ? JSON.parse(saved) : [
-          { id: '1', name: 'Иван Иванов', weeklyLimit: 40, hourlyRate: 15 },
-          { id: '2', name: 'Анна Смирнова', weeklyLimit: 35, hourlyRate: 16 }
-        ];
-      });
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+      const firstDay = new Date(year, month, 1);
+      const lastDay = new Date(year, month + 1, 0);
+      
+      let startingDay = firstDay.getDay() - 1;
+      if (startingDay === -1) startingDay = 6;
 
-      const [requirements, setRequirements] = useState(() => {
-        const saved = localStorage.getItem('ssp_reqs');
-        return saved ? JSON.parse(saved) : { morning: 2, evening: 1 };
-      });
+      const days = [];
+      for (let i = 0; i < startingDay; i++) days.push(null);
+      for (let i = 1; i <= lastDay.getDate(); i++) {
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+        days.push({ dayNumber: i, dateStr });
+      }
 
-      const [shifts, setShifts] = useState(() => {
-        const saved = localStorage.getItem('ssp_shifts');
-        return saved ? JSON.parse(saved) : {};
-      });
-
-      const [selectedDateStr, setSelectedDateStr] = useState(null);
-      const [conflicts, setConflicts] = useState([]);
-
-      useEffect(() => {
-        localStorage.setItem('ssp_staff', JSON.stringify(staff));
-      }, [staff]);
-
-      useEffect(() => {
-        localStorage.setItem('ssp_reqs', JSON.stringify(requirements));
-      }, [requirements]);
-
-      useEffect(() => {
-        localStorage.setItem('ssp_shifts', JSON.stringify(shifts));
-        validateSchedule();
-      }, [shifts, staff, requirements]);
-
-      const getDaysInMonth = (date) => {
-        const year = date.getFullYear();
-        const month = date.getMonth();
-        const days = [];
-        const firstDay = new Date(year, month, 1);
-        const lastDay = new Date(year, month + 1, 0);
-
-        let startingDay = firstDay.getDay() - 1;
-        if (startingDay === -1) startingDay = 6;
-
-        for (let i = 0; i < startingDay; i++) {
-          days.push(null);
-        }
-
-        for (let i = 1; i <= lastDay.getDate(); i++) {
-          const d = new Date(year, month, i);
-          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-          days.push({ dayNumber: i, dateStr, dateObj: d });
-        }
-        return days;
-      };
-
-      const validateSchedule = () => {
-        const newConflicts = [];
-        const staffHours = {};
-
-        Object.entries(shifts).forEach(([dateStr, dayShifts]) => {
-          ['morning', 'evening'].forEach(shiftType => {
-            const assigned = dayShifts[shiftType] || [];
-            const req = requirements[shiftType] || 0;
-            if (req > 0 && assigned.length < req) {
-              newConflicts.push(`${dateStr}: Недостаточно людей на смене "${shiftType === 'morning' ? 'Утро' : 'Вечер'}" (требуется ${req}, назначено ${assigned.length})`);
-            }
-            assigned.forEach(empId => {
-              staffHours[empId] = (staffHours[empId] || 0) + 8;
-            });
-          });
-        });
-
-        staff.forEach(emp => {
-          const hours = staffHours[emp.id] || 0;
-          const monthlyLimit = emp.weeklyLimit * 4;
-          if (hours > monthlyLimit) {
-            newConflicts.push(`${emp.name}: Превышен месячный лимит часов (${hours}ч / ${monthlyLimit}ч)`);
-          }
-        });
-
-        setConflicts(newConflicts);
-      };
-
-      const generateAutoSchedule = () => {
-        const year = currentDate.getFullYear();
-        const month = currentDate.getMonth();
-        const daysCount = new Date(year, month + 1, 0).getDate();
-        const newShifts = { ...shifts };
-
-        let empIndex = 0;
-
-        for (let day = 1; day <= daysCount; day++) {
-          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          newShifts[dateStr] = { morning: [], evening: [] };
-
-          const morningReq = requirements.morning || 0;
-          for (let m = 0; m < morningReq; m++) {
-            if (staff.length > 0) {
-              const emp = staff[empIndex % staff.length];
-              newShifts[dateStr].morning.push(emp.id);
-              empIndex++;
-            }
-          }
-
-          const eveningReq = requirements.evening || 0;
-          for (let e = 0; e < eveningReq; e++) {
-            if (staff.length > 0) {
-              const emp = staff[(empIndex + 1) % staff.length];
-              if (!newShifts[dateStr].morning.includes(emp.id)) {
-                newShifts[dateStr].evening.push(emp.id);
-                empIndex++;
-              }
-            }
-          }
-        }
-
-        setShifts(newShifts);
-      };
-
-      const days = getDaysInMonth(currentDate);
-      const totalCost = Object.values(shifts).reduce((acc, dayShifts) => {
-        let dayCost = 0;
+      let totalCost = 0;
+      Object.values(shifts).forEach(dayShifts => {
         ['morning', 'evening'].forEach(sType => {
           (dayShifts[sType] || []).forEach(empId => {
             const emp = staff.find(s => s.id === empId);
-            if (emp) dayCost += emp.hourlyRate * 8;
+            if (emp) totalCost += emp.hourlyRate * 8;
           });
         });
-        return acc + dayCost;
-      }, 0);
+      });
 
-      return (
-        <div className="max-w-md mx-auto min-h-screen flex flex-col pb-24 pt-4 px-4">
-          <header className="flex justify-between items-center py-3 border-b border-slate-800 mb-4">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-blue-400">SSP Calendar</h1>
-              <p className="text-xs text-slate-400">Планировщик смен iOS</p>
+      let content = `
+        <header class="flex justify-between items-center py-3 border-b border-slate-800 mb-4">
+          <div>
+            <h1 class="text-2xl font-bold tracking-tight text-blue-400">SSP Calendar</h1>
+            <p class="text-xs text-slate-400">Планировщик смен iOS</p>
+          </div>
+          <div class="text-right">
+            <div class="text-xs text-slate-400">ФОТ месяца</div>
+            <div class="text-lg font-bold text-emerald-400">€${totalCost.toLocaleString()}</div>
+          </div>
+        </header>
+      `;
+
+      if (activeTab === 'calendar') {
+        const monthName = currentDate.toLocaleString('ru', { month: 'long', year: 'numeric' });
+        content += `
+          <main class="space-y-4">
+            <div class="flex justify-between items-center bg-slate-800/60 rounded-2xl p-2 backdrop-blur">
+              <button onclick="changeMonth(-1)" class="p-2 hover:bg-slate-700 rounded-xl">◀</button>
+              <span class="font-semibold text-sm capitalize">${monthName}</span>
+              <button onclick="changeMonth(1)" class="p-2 hover:bg-slate-700 rounded-xl">▶</button>
             </div>
-            <div className="text-right">
-              <div className="text-xs text-slate-400">Бюджет месяца</div>
-              <div className="text-lg font-bold text-emerald-400">€{totalCost.toLocaleString()}</div>
+
+            <div class="grid grid-cols-7 gap-1 text-center text-xs font-medium text-slate-400">
+              <span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span>
             </div>
-          </header>
 
-          {conflicts.length > 0 && (
-            <div className="mb-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 text-xs text-amber-300">
-              <div className="font-semibold flex items-center gap-1.5 mb-1">
-                <AlertCircle className="w-4 h-4" /> Найдено конфликтов: {conflicts.length}
-              </div>
-              <ul className="list-disc pl-4 space-y-0.5 max-h-20 overflow-y-auto">
-                {conflicts.slice(0, 3).map((c, idx) => <li key={idx}>{c}</li>)}
-              </ul>
-            </div>
-          )}
+            <div class="grid grid-cols-7 gap-1.5">
+              ${days.map(d => {
+                if (!d) return `<div class="h-20 rounded-2xl bg-slate-900/30"></div>`;
+                const dayShift = shifts[d.dateStr] || { morning: [], evening: [] };
+                const workingIds = [...(dayShift.morning || []), ...(dayShift.evening || [])];
+                const offStaff = staff.filter(s => !workingIds.includes(s.id));
 
-          {activeTab === 'calendar' && (
-            <main className="space-y-4">
-              <div className="flex justify-between items-center bg-slate-800/60 rounded-2xl p-2 backdrop-blur">
-                <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))} className="p-2 hover:bg-slate-700 rounded-xl">
-                  <ChevronLeft className="w-5 h-5"/>
-                </button>
-                <span className="font-semibold text-sm">
-                  {currentDate.toLocaleString('ru', { month: 'long', year: 'numeric' })}
-                </span>
-                <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))} className="p-2 hover:bg-slate-700 rounded-xl">
-                  <ChevronRight className="w-5 h-5"/>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-slate-400">
-                <span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span>
-              </div>
-
-              <div className="grid grid-cols-7 gap-1.5">
-                {days.map((d, i) => {
-                  if (!d) return <div key={i} className="h-16 rounded-2xl bg-slate-900/30"></div>;
-                  const dayShift = shifts[d.dateStr] || { morning: [], evening: [] };
-                  const workingIds = [...(dayShift.morning || []), ...(dayShift.evening || [])];
-                  const offStaff = staff.filter(s => !workingIds.includes(s.id));
-
-                  return (
-                    <div key={d.dateStr} onClick={() => setSelectedDateStr(d.dateStr)} className="h-20 bg-slate-800/40 border border-slate-700/50 rounded-2xl p-1.5 flex flex-col justify-between cursor-pointer active:scale-95 transition-transform">
-                      <span className="text-xs font-bold text-slate-300">{d.dayNumber}</span>
-                      <div className="space-y-0.5">
-                        {dayShift.morning?.length > 0 && <div className="text-[9px] bg-amber-500/20 text-amber-300 px-1 rounded truncate">Ут: {dayShift.morning.length}ч</div>}
-                        {dayShift.evening?.length > 0 && <div className="text-[9px] bg-indigo-500/20 text-indigo-300 px-1 rounded truncate">Веч: {dayShift.evening.length}ч</div>}
-                      </div>
-                      <div className="text-[9px] text-slate-400 truncate bg-slate-900/60 px-1 rounded">
-                        ☕ {offStaff.length > 0 ? offStaff.map(s => s.name.split(' ')[0]).join(', ') : 'Нет'}
-                      </div>
+                return `
+                  <div onclick="selectDate('${d.dateStr}')" class="h-20 bg-slate-800/40 border border-slate-700/50 rounded-2xl p-1.5 flex flex-col justify-between cursor-pointer active:scale-95 transition-transform overflow-hidden">
+                    <span class="text-xs font-bold text-slate-300">${d.dayNumber}</span>
+                    <div class="space-y-0.5">
+                      ${dayShift.morning?.length ? `<div class="text-[9px] bg-amber-500/20 text-amber-300 px-1 rounded truncate">Ут: ${dayShift.morning.length}ч</div>` : ''}
+                      ${dayShift.evening?.length ? `<div class="text-[9px] bg-indigo-500/20 text-indigo-300 px-1 rounded truncate">Веч: ${dayShift.evening.length}ч</div>` : ''}
                     </div>
-                  );
-                })}
-              </div>
-            </main>
-          )}
-
-          {activeTab === 'staff' && (
-            <main className="space-y-4">
-              <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-4 space-y-3">
-                <h3 className="font-semibold text-sm text-slate-200">Требования к сменам</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-slate-400">Утро (чел.)</label>
-                    <input type="number" value={requirements.morning} onChange={e => setRequirements({...requirements, morning: parseInt(e.target.value) || 0})} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-sm text-center"/>
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400">Вечер (чел.)</label>
-                    <input type="number" value={requirements.evening} onChange={e => setRequirements({...requirements, evening: parseInt(e.target.value) || 0})} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-sm text-center"/>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <h3 className="font-semibold text-sm text-slate-200">Сотрудники</h3>
-                  <button onClick={() => setStaff([...staff, { id: Date.now().toString(), name: 'Новый сотрудник', weeklyLimit: 40, hourlyRate: 15 }])} className="text-xs bg-blue-600 px-3 py-1.5 rounded-xl font-medium flex items-center gap-1">
-                    <Plus className="w-3.5 h-3.5"/> Добавить
-                  </button>
-                </div>
-                {staff.map((emp, index) => (
-                  <div key={emp.id} className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-3 space-y-2">
-                    <div className="flex gap-2">
-                      <input type="text" value={emp.name} onChange={e => { const updated = [...staff]; updated[index].name = e.target.value; setStaff(updated); }} className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-2 py-1 text-sm"/>
-                      <button onClick={() => setStaff(staff.filter(s => s.id !== emp.id))} className="text-red-400 p-1"><Trash2 className="w-4 h-4"/></button>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div>
-                        <span className="text-slate-400">Лимит (ч/нед)</span>
-                        <input type="number" value={emp.weeklyLimit} onChange={e => { const updated = [...staff]; updated[index].weeklyLimit = parseInt(e.target.value)||0; setStaff(updated); }} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-1 mt-0.5 text-center"/>
-                      </div>
-                      <div>
-                        <span className="text-slate-400">Ставка (€/ч)</span>
-                        <input type="number" value={emp.hourlyRate} onChange={e => { const updated = [...staff]; updated[index].hourlyRate = parseFloat(e.target.value)||0; setStaff(updated); }} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-1 mt-0.5 text-center"/>
-                      </div>
+                    <div class="text-[9px] text-slate-400 truncate bg-slate-900/60 px-1 rounded">
+                      ☕ ${offStaff.length > 0 ? offStaff.map(s => s.name.split(' ')[0]).join(', ') : 'Нет'}
                     </div>
                   </div>
-                ))}
-              </div>
-            </main>
-          )}
-
-          {activeTab === 'auto' && (
-            <main className="space-y-4 text-center py-6">
-              <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-3">
-                <RefreshCw className="w-10 h-10 text-blue-400 mx-auto animate-spin-slow"/>
-                <h3 className="font-bold text-base">Автоматическое расписание</h3>
-                <p className="text-xs text-slate-400">Сгенерировать график на весь текущий месяц с учетом состава смен и лимитов часов сотрудников.</p>
-                <button onClick={generateAutoSchedule} className="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-2xl font-bold text-sm shadow-lg shadow-blue-600/30">
-                  Заполнить месяц
-                </button>
-              </div>
-            </main>
-          )}
-
-          {selectedDateStr && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50">
-              <div className="bg-slate-900 border-t border-slate-800 w-full max-w-md rounded-t-3xl p-5 space-y-4 animate-slide-up">
-                <div className="flex justify-between items-center">
-                  <h3 className="font-bold text-base">Смены на {selectedDateStr}</h3>
-                  <button onClick={() => setSelectedDateStr(null)} className="text-xs bg-slate-800 px-3 py-1.5 rounded-xl text-slate-400">Закрыть</button>
+                `;
+              }).join('')}
+            </div>
+          </main>
+        `;
+      } else if (activeTab === 'staff') {
+        content += `
+          <main class="space-y-4">
+            <div class="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-4 space-y-3">
+              <h3 class="font-semibold text-sm text-slate-200">Требования к сменам</h3>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="text-xs text-slate-400">Утро (чел.)</label>
+                  <input type="number" value="${requirements.morning}" onchange="updateReq('morning', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-sm text-center"/>
                 </div>
-                {['morning', 'evening'].map(sType => {
-                  const currentAssigned = shifts[selectedDateStr]?.[sType] || [];
-                  return (
-                    <div key={sType} className="space-y-1.5">
-                      <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{sType === 'morning' ? 'Утро' : 'Вечер'}</div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {staff.map(s => {
-                          const isAssigned = currentAssigned.includes(s.id);
-                          return (
-                            <button key={s.id} onClick={() => {
-                              const dayObj = shifts[selectedDateStr] || { morning: [], evening: [] };
-                              const list = dayObj[sType] || [];
-                              const newList = isAssigned ? list.filter(id => id !== s.id) : [...list, s.id];
-                              setShifts({ ...shifts, [selectedDateStr]: { ...dayObj, [sType]: newList } });
-                            }} className={`p-2 rounded-xl text-xs flex items-center justify-between border ${isAssigned ? 'bg-blue-600/20 border-blue-500 text-blue-300' : 'bg-slate-800/40 border-slate-700 text-slate-400'}`}>
-                              <span>{s.name}</span>
-                              {isAssigned && <CheckCircle2 className="w-3.5 h-3.5 text-blue-400"/>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
+                <div>
+                  <label class="text-xs text-slate-400">Вечер (чел.)</label>
+                  <input type="number" value="${requirements.evening}" onchange="updateReq('evening', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-sm text-center"/>
+                </div>
               </div>
             </div>
-          )}
 
-          <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/90 backdrop-blur border-t border-slate-800 px-6 py-3 flex justify-around items-center z-40 pb-6">
-            <button onClick={() => setActiveTab('calendar')} className={`flex flex-col items-center gap-1 text-xs ${activeTab === 'calendar' ? 'text-blue-400 font-bold' : 'text-slate-400'}`}>
-              <Calendar className="w-5 h-5"/> Календарь
-            </button>
-            <button onClick={() => setActiveTab('staff')} className={`flex flex-col items-center gap-1 text-xs ${activeTab === 'staff' ? 'text-blue-400 font-bold' : 'text-slate-400'}`}>
-              <Users className="w-5 h-5"/> Персонал
-            </button>
-            <button onClick={() => setActiveTab('auto')} className={`flex flex-col items-center gap-1 text-xs ${activeTab === 'auto' ? 'text-blue-400 font-bold' : 'text-slate-400'}`}>
-              <Sliders className="w-5 h-5"/> Авто-ИИ
-            </button>
-          </nav>
-        </div>
-      );
+            <div class="space-y-2">
+              <div class="flex justify-between items-center">
+                <h3 class="font-semibold text-sm text-slate-200">Сотрудники</h3>
+                <button onclick="addStaff()" class="text-xs bg-blue-600 px-3 py-1.5 rounded-xl font-medium">+ Добавить</button>
+              </div>
+              ${staff.map((emp, i) => `
+                <div class="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-3 space-y-2">
+                  <div class="flex gap-2">
+                    <input type="text" value="${emp.name}" onchange="updateStaff(${i}, 'name', this.value)" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-2 py-1 text-sm"/>
+                    <button onclick="removeStaff(${i})" class="text-red-400 px-2">✕</button>
+                  </div>
+                  <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span class="text-slate-400">Лимит (ч/нед)</span>
+                      <input type="number" value="${emp.weeklyLimit}" onchange="updateStaff(${i}, 'weeklyLimit', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-1 mt-0.5 text-center"/>
+                    </div>
+                    <div>
+                      <span class="text-slate-400">Ставка (€/ч)</span>
+                      <input type="number" value="${emp.hourlyRate}" onchange="updateStaff(${i}, 'hourlyRate', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-1 mt-0.5 text-center"/>
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </main>
+        `;
+      } else if (activeTab === 'auto') {
+        content += `
+          <main class="space-y-4 text-center py-6">
+            <div class="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-3">
+              <div class="text-4xl">⚡</div>
+              <h3 class="font-bold text-base">Автоматическое расписание</h3>
+              <p class="text-xs text-slate-400">Сгенерировать график на весь текущий месяц с учетом состава смен и лимитов часов сотрудников.</p>
+              <button onclick="autoSchedule()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-2xl font-bold text-sm shadow-lg shadow-blue-600/30">
+                Заполнить месяц
+              </button>
+            </div>
+          </main>
+        `;
+      }
+
+      if (selectedDateStr) {
+        const dayObj = shifts[selectedDateStr] || { morning: [], evening: [] };
+        content += `
+          <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50">
+            <div class="bg-slate-900 border-t border-slate-800 w-full max-w-md rounded-t-3xl p-5 space-y-4">
+              <div class="flex justify-between items-center">
+                <h3 class="font-bold text-base">Смены на ${selectedDateStr}</h3>
+                <button onclick="selectedDateStr = null; render();" class="text-xs bg-slate-800 px-3 py-1.5 rounded-xl text-slate-400">Закрыть</button>
+              </div>
+              ${['morning', 'evening'].map(sType => `
+                <div class="space-y-1.5">
+                  <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">${sType === 'morning' ? 'Утро' : 'Вечер'}</div>
+                  <div class="grid grid-cols-2 gap-2">
+                    ${staff.map(s => {
+                      const isAssigned = (dayObj[sType] || []).includes(s.id);
+                      return `
+                        <button onclick="toggleShift('${selectedDateStr}', '${sType}', '${s.id}')" class="p-2 rounded-xl text-xs flex items-center justify-between border ${isAssigned ? 'bg-blue-600/20 border-blue-500 text-blue-300' : 'bg-slate-800/40 border-slate-700 text-slate-400'}">
+                          <span>${s.name}</span>
+                          <span>${isAssigned ? '✓' : ''}</span>
+                        </button>
+                      `;
+                    }).join('')}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      content += `
+        <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/90 backdrop-blur border-t border-slate-800 px-6 py-3 flex justify-around items-center z-40 pb-6">
+          <button onclick="activeTab = 'calendar'; render();" class="flex flex-col items-center text-xs ${activeTab === 'calendar' ? 'text-blue-400 font-bold' : 'text-slate-400'}">📅 Календарь</button>
+          <button onclick="activeTab = 'staff'; render();" class="flex flex-col items-center text-xs ${activeTab === 'staff' ? 'text-blue-400 font-bold' : 'text-slate-400'}">👥 Персонал</button>
+          <button onclick="activeTab = 'auto'; render();" class="flex flex-col items-center text-xs ${activeTab === 'auto' ? 'text-blue-400 font-bold' : 'text-slate-400'}">⚡ Авто-ИИ</button>
+        </nav>
+      `;
+
+      app.innerHTML = content;
     }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<SSPCalendarApp />);
+    function changeMonth(delta) {
+      currentDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + delta, 1);
+      render();
+    }
+
+    function selectDate(dateStr) {
+      selectedDateStr = dateStr;
+      render();
+    }
+
+    function toggleShift(dateStr, sType, empId) {
+      if (!shifts[dateStr]) shifts[dateStr] = { morning: [], evening: [] };
+      const list = shifts[dateStr][sType] || [];
+      if (list.includes(empId)) {
+        shifts[dateStr][sType] = list.filter(id => id !== empId);
+      } else {
+        shifts[dateStr][sType] = [...list, empId];
+      }
+      render();
+    }
+
+    function updateReq(type, val) {
+      requirements[type] = parseInt(val) || 0;
+      render();
+    }
+
+    function addStaff() {
+      staff.push({ id: Date.now().toString(), name: 'Новый сотрудник', weeklyLimit: 40, hourlyRate: 15 });
+      render();
+    }
+
+    function updateStaff(i, field, val) {
+      staff[i][field] = field === 'name' ? val : parseFloat(val) || 0;
+      render();
+    }
+
+    function removeStaff(i) {
+      staff.splice(i, 1);
+      render();
+    }
+
+    function autoSchedule() {
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+      const daysCount = new Date(year, month + 1, 0).getDate();
+      let empIndex = 0;
+
+      for (let day = 1; day <= daysCount; day++) {
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        shifts[dateStr] = { morning: [], evening: [] };
+
+        for (let m = 0; m < (requirements.morning || 0); m++) {
+          if (staff.length) {
+            shifts[dateStr].morning.push(staff[empIndex % staff.length].id);
+            empIndex++;
+          }
+        }
+        for (let e = 0; e < (requirements.evening || 0); e++) {
+          if (staff.length) {
+            const emp = staff[(empIndex + 1) % staff.length];
+            if (!shifts[dateStr].morning.includes(emp.id)) {
+              shifts[dateStr].evening.push(emp.id);
+              empIndex++;
+            }
+          }
+        }
+      }
+      activeTab = 'calendar';
+      render();
+    }
+
+    render();
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
