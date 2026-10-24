@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>SSP Calendar</title>
   
+  <!-- iOS PWA Meta -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="SSP Calendar">
@@ -19,14 +20,22 @@
       -webkit-user-select: none;
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif;
     }
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+    .animate-slide-up {
+      animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
   </style>
 </head>
-<body class="bg-slate-900 text-white antialiased min-h-screen">
-  <div id="app" class="max-w-md mx-auto min-h-screen flex flex-col pb-24 pt-4 px-4"></div>
+<body class="bg-slate-950 text-slate-100 antialiased min-h-screen selection:bg-blue-500 selection:text-white">
+  <div id="app" class="max-w-md mx-auto min-h-screen flex flex-col pb-28 pt-4 px-4"></div>
 
   <script>
     let currentDate = new Date();
     let activeTab = 'calendar';
+    let showOffDutyOnGrid = true;
     
     let staff = JSON.parse(localStorage.getItem('ssp_staff')) || [
       { id: '1', name: 'Иван Иванов', weeklyLimit: 40, hourlyRate: 15 },
@@ -41,6 +50,35 @@
       localStorage.setItem('ssp_staff', JSON.stringify(staff));
       localStorage.setItem('ssp_reqs', JSON.stringify(requirements));
       localStorage.setItem('ssp_shifts', JSON.stringify(shifts));
+    }
+
+    function getConflicts() {
+      const newConflicts = [];
+      const staffHours = {};
+
+      Object.entries(shifts).forEach(([dateStr, dayShifts]) => {
+        ['morning', 'evening'].forEach(shiftType => {
+          const assigned = dayShifts[shiftType] || [];
+          const req = requirements[shiftType] || 0;
+          if (req > 0 && assigned.length < req) {
+            const shiftName = shiftType === 'morning' ? 'Утро' : 'Вечер';
+            newConflicts.push(`${dateStr}: Мало людей на смене "${shiftName}" (${assigned.length}/${req})`);
+          }
+          assigned.forEach(empId => {
+            staffHours[empId] = (staffHours[empId] || 0) + 8;
+          });
+        });
+      });
+
+      staff.forEach(emp => {
+        const hours = staffHours[emp.id] || 0;
+        const monthlyLimit = emp.weeklyLimit * 4;
+        if (hours > monthlyLimit) {
+          newConflicts.push(`${emp.name}: Превышен лимит (${hours}ч / ${monthlyLimit}ч)`);
+        }
+      });
+
+      return newConflicts;
     }
 
     function render() {
@@ -72,50 +110,105 @@
         });
       });
 
+      const conflicts = getConflicts();
+
       let content = `
-        <header class="flex justify-between items-center py-3 border-b border-slate-800 mb-4">
+        <!-- Header -->
+        <header class="flex justify-between items-center py-3 border-b border-slate-800/80 mb-4 backdrop-blur-md sticky top-0 bg-slate-950/80 z-30">
           <div>
-            <h1 class="text-2xl font-bold tracking-tight text-blue-400">SSP Calendar</h1>
-            <p class="text-xs text-slate-400">Планировщик смен iOS</p>
+            <div class="flex items-center gap-2">
+              <span class="text-xl">📅</span>
+              <h1 class="text-xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-300">SSP Calendar</h1>
+            </div>
+            <p class="text-[11px] font-medium text-slate-400">График и учет смен iOS</p>
           </div>
-          <div class="text-right">
-            <div class="text-xs text-slate-400">ФОТ месяца</div>
-            <div class="text-lg font-bold text-emerald-400">€${totalCost.toLocaleString()}</div>
+          <div class="text-right bg-slate-900/60 border border-slate-800/80 px-3 py-1.5 rounded-2xl">
+            <div class="text-[10px] uppercase font-semibold tracking-wider text-slate-400">ФОТ Месяца</div>
+            <div class="text-base font-extrabold text-emerald-400">€${totalCost.toLocaleString()}</div>
           </div>
         </header>
       `;
 
+      if (conflicts.length > 0 && activeTab === 'calendar') {
+        content += `
+          <div class="mb-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl p-3 text-xs text-amber-300 shadow-lg shadow-amber-500/5">
+            <div class="font-bold flex items-center gap-1.5 mb-1.5 text-amber-400">
+              <span>⚠️</span> Найдено замечаний: ${conflicts.length}
+            </div>
+            <ul class="space-y-1 max-h-20 overflow-y-auto text-[11px] opacity-90 pl-1">
+              ${conflicts.slice(0, 3).map(c => `<li>• ${c}</li>`).join('')}
+            </ul>
+          </div>
+        `;
+      }
+
       if (activeTab === 'calendar') {
         const monthName = currentDate.toLocaleString('ru', { month: 'long', year: 'numeric' });
         content += `
-          <main class="space-y-4">
-            <div class="flex justify-between items-center bg-slate-800/60 rounded-2xl p-2 backdrop-blur">
-              <button onclick="changeMonth(-1)" class="p-2 hover:bg-slate-700 rounded-xl">◀</button>
-              <span class="font-semibold text-sm capitalize">${monthName}</span>
-              <button onclick="changeMonth(1)" class="p-2 hover:bg-slate-700 rounded-xl">▶</button>
+          <main class="space-y-3">
+            <!-- Controls Bar -->
+            <div class="flex items-center justify-between bg-slate-900/80 border border-slate-800 rounded-2xl p-1.5 backdrop-blur-md">
+              <button onclick="changeMonth(-1)" class="w-9 h-9 flex items-center justify-center bg-slate-800/60 hover:bg-slate-700/60 active:scale-90 rounded-xl text-slate-300 font-bold transition">‹</button>
+              <span class="font-bold text-sm text-slate-200 capitalize tracking-wide">${monthName}</span>
+              <button onclick="changeMonth(1)" class="w-9 h-9 flex items-center justify-center bg-slate-800/60 hover:bg-slate-700/60 active:scale-90 rounded-xl text-slate-300 font-bold transition">›</button>
             </div>
 
-            <div class="grid grid-cols-7 gap-1 text-center text-xs font-medium text-slate-400">
-              <span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span>
+            <div class="flex justify-between items-center px-1">
+              <span class="text-[11px] font-medium text-slate-400">Сетка месяца</span>
+              <button onclick="toggleOffDutyGrid()" class="text-[11px] font-semibold text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded-xl border border-blue-500/20 active:scale-95 transition">
+                ${showOffDutyOnGrid ? '☕ Выходные: Видны' : '☕ Выходные: Скрыты'}
+              </button>
             </div>
 
+            <!-- Days Header -->
+            <div class="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-slate-500 py-1">
+              <span>ПН</span><span>ВТ</span><span>СР</span><span>ЧТ</span><span>ПТ</span><span>СБ</span><span>ВC</span>
+            </div>
+
+            <!-- Calendar Grid -->
             <div class="grid grid-cols-7 gap-1.5">
               ${days.map(d => {
-                if (!d) return `<div class="h-20 rounded-2xl bg-slate-900/30"></div>`;
+                if (!d) return `<div class="h-24 rounded-2xl bg-slate-900/20 border border-slate-900/40"></div>`;
                 const dayShift = shifts[d.dateStr] || { morning: [], evening: [] };
+                const morningCount = (dayShift.morning || []).length;
+                const eveningCount = (dayShift.evening || []).length;
+                
+                const reqM = requirements.morning || 0;
+                const reqE = requirements.evening || 0;
+                
+                const hasIssue = (reqM > 0 && morningCount < reqM) || (reqE > 0 && eveningCount < reqE);
+
                 const workingIds = [...(dayShift.morning || []), ...(dayShift.evening || [])];
                 const offStaff = staff.filter(s => !workingIds.includes(s.id));
 
                 return `
-                  <div onclick="selectDate('${d.dateStr}')" class="h-20 bg-slate-800/40 border border-slate-700/50 rounded-2xl p-1.5 flex flex-col justify-between cursor-pointer active:scale-95 transition-transform overflow-hidden">
-                    <span class="text-xs font-bold text-slate-300">${d.dayNumber}</span>
-                    <div class="space-y-0.5">
-                      ${dayShift.morning?.length ? `<div class="text-[9px] bg-amber-500/20 text-amber-300 px-1 rounded truncate">Ут: ${dayShift.morning.length}ч</div>` : ''}
-                      ${dayShift.evening?.length ? `<div class="text-[9px] bg-indigo-500/20 text-indigo-300 px-1 rounded truncate">Веч: ${dayShift.evening.length}ч</div>` : ''}
+                  <div onclick="selectDate('${d.dateStr}')" className="" class="h-24 bg-slate-900/60 border ${hasIssue ? 'border-amber-500/40 bg-amber-500/5' : 'border-slate-800/80'} hover:border-slate-700 rounded-2xl p-1.5 flex flex-col justify-between cursor-pointer active:scale-95 transition-all overflow-hidden relative group">
+                    <div class="flex justify-between items-center">
+                      <span class="text-xs font-black ${hasIssue ? 'text-amber-400' : 'text-slate-200'}">${d.dayNumber}</span>
+                      ${hasIssue ? `<span class="text-[9px] text-amber-400">⚠️</span>` : ''}
                     </div>
-                    <div class="text-[9px] text-slate-400 truncate bg-slate-900/60 px-1 rounded">
-                      ☕ ${offStaff.length > 0 ? offStaff.map(s => s.name.split(' ')[0]).join(', ') : 'Нет'}
+
+                    <div class="space-y-1 my-auto">
+                      ${reqM > 0 ? `
+                        <div class="text-[9px] font-semibold px-1 py-0.5 rounded-lg flex justify-between items-center ${morningCount >= reqM ? 'bg-amber-500/15 text-amber-300 border border-amber-500/20' : 'bg-red-500/15 text-red-300 border border-red-500/20'}">
+                          <span>Утр</span>
+                          <span class="font-bold">${morningCount}/${reqM}</span>
+                        </div>
+                      ` : ''}
+                      ${reqE > 0 ? `
+                        <div class="text-[9px] font-semibold px-1 py-0.5 rounded-lg flex justify-between items-center ${eveningCount >= reqE ? 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/20' : 'bg-red-500/15 text-red-300 border border-red-500/20'}">
+                          <span>Веч</span>
+                          <span class="font-bold">${eveningCount}/${reqE}</span>
+                        </div>
+                      ` : ''}
                     </div>
+
+                    ${showOffDutyOnGrid ? `
+                      <div class="text-[8px] font-medium text-slate-400 truncate bg-slate-950/80 px-1 py-0.5 rounded-md border border-slate-800/50 flex items-center gap-0.5">
+                        <span class="opacity-70">☕</span>
+                        <span class="truncate">${offStaff.length > 0 ? offStaff.map(s => s.name.split(' ')[0]).join(', ') : 'Никого'}</span>
+                      </div>
+                    ` : ''}
                   </div>
                 `;
               }).join('')}
@@ -125,39 +218,56 @@
       } else if (activeTab === 'staff') {
         content += `
           <main class="space-y-4">
-            <div class="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-4 space-y-3">
-              <h3 class="font-semibold text-sm text-slate-200">Требования к сменам</h3>
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="text-xs text-slate-400">Утро (чел.)</label>
-                  <input type="number" value="${requirements.morning}" onchange="updateReq('morning', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-sm text-center"/>
+            <!-- Shift Requirements -->
+            <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-4 space-y-3 backdrop-blur-md shadow-xl">
+              <div class="flex items-center gap-2">
+                <span class="text-base">⚙️</span>
+                <h3 class="font-bold text-sm text-slate-100">Требования к сменам (Состав)</h3>
+              </div>
+              <p class="text-[11px] text-slate-400">Укажите, сколько человек должно выходить в каждую смену (можно поставить 0, если смена не нужна).</p>
+              <div class="grid grid-cols-2 gap-3 pt-1">
+                <div class="bg-slate-950/60 border border-slate-800 p-3 rounded-2xl text-center">
+                  <label class="text-[11px] font-medium text-amber-300/80 block mb-1">Утренняя смена</label>
+                  <div class="flex items-center justify-center gap-2">
+                    <button onclick="updateReq('morning', Math.max(0, requirements.morning - 1))" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-200 font-bold active:scale-90">-</button>
+                    <span class="text-base font-extrabold w-6">${requirements.morning}</span>
+                    <button onclick="updateReq('morning', requirements.morning + 1)" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-200 font-bold active:scale-90">+</button>
+                  </div>
                 </div>
-                <div>
-                  <label class="text-xs text-slate-400">Вечер (чел.)</label>
-                  <input type="number" value="${requirements.evening}" onchange="updateReq('evening', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-sm text-center"/>
+                <div class="bg-slate-950/60 border border-slate-800 p-3 rounded-2xl text-center">
+                  <label class="text-[11px] font-medium text-indigo-300/80 block mb-1">Вечерняя смена</label>
+                  <div class="flex items-center justify-center gap-2">
+                    <button onclick="updateReq('evening', Math.max(0, requirements.evening - 1))" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-200 font-bold active:scale-90">-</button>
+                    <span class="text-base font-extrabold w-6">${requirements.evening}</span>
+                    <button onclick="updateReq('evening', requirements.evening + 1)" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-200 font-bold active:scale-90">+</button>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div class="space-y-2">
-              <div class="flex justify-between items-center">
-                <h3 class="font-semibold text-sm text-slate-200">Сотрудники</h3>
-                <button onclick="addStaff()" class="text-xs bg-blue-600 px-3 py-1.5 rounded-xl font-medium">+ Добавить</button>
+            <!-- Staff List -->
+            <div class="space-y-3">
+              <div class="flex justify-between items-center px-1">
+                <h3 class="font-bold text-sm text-slate-200">Список сотрудников</h3>
+                <button onclick="addStaff()" class="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 shadow-lg shadow-blue-600/20 active:scale-95 transition">
+                  <span>+</span> Добавить
+                </button>
               </div>
+
               ${staff.map((emp, i) => `
-                <div class="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-3 space-y-2">
-                  <div class="flex gap-2">
-                    <input type="text" value="${emp.name}" onchange="updateStaff(${i}, 'name', this.value)" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-2 py-1 text-sm"/>
-                    <button onclick="removeStaff(${i})" class="text-red-400 px-2">✕</button>
+                <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-3.5 space-y-3 shadow-lg">
+                  <div class="flex items-center gap-2">
+                    <input type="text" value="${emp.name}" onchange="updateStaff(${i}, 'name', this.value)" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm font-semibold text-slate-100 focus:outline-none focus:border-blue-500"/>
+                    <button onclick="removeStaff(${i})" class="w-9 h-9 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 text-red-400 rounded-xl flex items-center justify-center font-bold active:scale-90 transition">✕</button>
                   </div>
                   <div class="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span class="text-slate-400">Лимит (ч/нед)</span>
-                      <input type="number" value="${emp.weeklyLimit}" onchange="updateStaff(${i}, 'weeklyLimit', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-1 mt-0.5 text-center"/>
+                    <div class="bg-slate-950/40 border border-slate-800/80 p-2 rounded-xl">
+                      <span class="text-[10px] text-slate-400 block font-medium">Лимит (ч/нед)</span>
+                      <input type="number" value="${emp.weeklyLimit}" onchange="updateStaff(${i}, 'weeklyLimit', this.value)" class="w-full bg-slate-900 border border-slate-800 rounded-lg p-1 mt-1 text-center font-bold text-slate-200"/>
                     </div>
-                    <div>
-                      <span class="text-slate-400">Ставка (€/ч)</span>
-                      <input type="number" value="${emp.hourlyRate}" onchange="updateStaff(${i}, 'hourlyRate', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-1 mt-0.5 text-center"/>
+                    <div class="bg-slate-950/40 border border-slate-800/80 p-2 rounded-xl">
+                      <span class="text-[10px] text-slate-400 block font-medium">Ставка (€/ч)</span>
+                      <input type="number" value="${emp.hourlyRate}" onchange="updateStaff(${i}, 'hourlyRate', this.value)" class="w-full bg-slate-900 border border-slate-800 rounded-lg p-1 mt-1 text-center font-bold text-emerald-400"/>
                     </div>
                   </div>
                 </div>
@@ -168,53 +278,88 @@
       } else if (activeTab === 'auto') {
         content += `
           <main class="space-y-4 text-center py-6">
-            <div class="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-3">
-              <div class="text-4xl">⚡</div>
-              <h3 class="font-bold text-base">Автоматическое расписание</h3>
-              <p class="text-xs text-slate-400">Сгенерировать график на весь текущий месяц с учетом состава смен и лимитов часов сотрудников.</p>
-              <button onclick="autoSchedule()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-2xl font-bold text-sm shadow-lg shadow-blue-600/30">
-                Заполнить месяц
+            <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-xl backdrop-blur-md">
+              <div class="w-16 h-16 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-center justify-center text-3xl mx-auto text-blue-400">⚡</div>
+              <div>
+                <h3 class="font-bold text-base text-slate-100">Автоматический генератор</h3>
+                <p class="text-xs text-slate-400 mt-1 leading-relaxed">Система распределит смены на текущий месяц с учетом требований к утренней (${requirements.morning} чел.) и вечерней (${requirements.evening} чел.) сменам.</p>
+              </div>
+              <button onclick="autoSchedule()" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white py-3.5 rounded-2xl font-bold text-sm shadow-xl shadow-blue-600/25 active:scale-98 transition">
+                Сгенерировать график
               </button>
             </div>
           </main>
         `;
       }
 
+      <!-- Bottom Sheet Modal for Shift Editing -->
       if (selectedDateStr) {
         const dayObj = shifts[selectedDateStr] || { morning: [], evening: [] };
+        const workingIds = [...(dayObj.morning || []), ...(dayObj.evening || [])];
+        const offStaff = staff.filter(s => !workingIds.includes(s.id));
+
         content += `
-          <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50">
-            <div class="bg-slate-900 border-t border-slate-800 w-full max-w-md rounded-t-3xl p-5 space-y-4">
-              <div class="flex justify-between items-center">
-                <h3 class="font-bold text-base">Смены на ${selectedDateStr}</h3>
-                <button onclick="selectedDateStr = null; render();" class="text-xs bg-slate-800 px-3 py-1.5 rounded-xl text-slate-400">Закрыть</button>
-              </div>
-              ${['morning', 'evening'].map(sType => `
-                <div class="space-y-1.5">
-                  <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">${sType === 'morning' ? 'Утро' : 'Вечер'}</div>
-                  <div class="grid grid-cols-2 gap-2">
-                    ${staff.map(s => {
-                      const isAssigned = (dayObj[sType] || []).includes(s.id);
-                      return `
-                        <button onclick="toggleShift('${selectedDateStr}', '${sType}', '${s.id}')" class="p-2 rounded-xl text-xs flex items-center justify-between border ${isAssigned ? 'bg-blue-600/20 border-blue-500 text-blue-300' : 'bg-slate-800/40 border-slate-700 text-slate-400'}">
-                          <span>${s.name}</span>
-                          <span>${isAssigned ? '✓' : ''}</span>
-                        </button>
-                      `;
-                    }).join('')}
-                  </div>
+          <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-end justify-center z-50">
+            <div class="bg-slate-900 border-t border-slate-800 w-full max-w-md rounded-t-[32px] p-5 space-y-4 animate-slide-up shadow-2xl max-h-[85vh] overflow-y-auto">
+              <div class="flex justify-between items-center border-b border-slate-800/80 pb-3">
+                <div>
+                  <h3 class="font-bold text-base text-slate-100">Настройка смен</h3>
+                  <p class="text-xs text-slate-400">${selectedDateStr}</p>
                 </div>
-              `).join('')}
+                <button onclick="selectedDateStr = null; render();" class="w-8 h-8 bg-slate-800 text-slate-400 rounded-full font-bold flex items-center justify-center active:scale-90">✕</button>
+              </div>
+
+              <!-- Off-duty block in modal -->
+              <div class="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-3">
+                <div class="text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mb-1">
+                  <span>☕</span> Выходные сегодня (${offStaff.length} чел.)
+                </div>
+                <p class="text-xs text-slate-300 font-medium">${offStaff.length > 0 ? offStaff.map(s => s.name).join(', ') : 'Все сотрудники задействованы'}</p>
+              </div>
+
+              ${['morning', 'evening'].map(sType => {
+                const req = requirements[sType] || 0;
+                const assigned = dayObj[sType] || [];
+                const title = sType === 'morning' ? 'Утренняя смена' : 'Вечерняя смена';
+                const badgeColor = sType === 'morning' ? 'text-amber-400' : 'text-indigo-400';
+
+                return `
+                  <div class="space-y-2">
+                    <div class="flex justify-between items-center">
+                      <span class="text-xs font-bold ${badgeColor} uppercase tracking-wider">${title}</span>
+                      <span class="text-[11px] font-semibold text-slate-400">Назначено: ${assigned.length} из ${req}</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                      ${staff.map(s => {
+                        const isAssigned = assigned.includes(s.id);
+                        return `
+                          <button onclick="toggleShift('${selectedDateStr}', '${sType}', '${s.id}')" class="p-2.5 rounded-2xl text-xs font-medium flex items-center justify-between border transition active:scale-95 ${isAssigned ? 'bg-blue-600/20 border-blue-500 text-blue-200 shadow-md shadow-blue-500/10' : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'}">
+                            <span class="truncate">${s.name}</span>
+                            <span class="font-bold text-sm">${isAssigned ? '✓' : ''}</span>
+                          </button>
+                        `;
+                      }).join('')}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
             </div>
           </div>
         `;
       }
 
+      <!-- Bottom Tab Navigation (iOS Glassmorphism) -->
       content += `
-        <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/90 backdrop-blur border-t border-slate-800 px-6 py-3 flex justify-around items-center z-40 pb-6">
-          <button onclick="activeTab = 'calendar'; render();" class="flex flex-col items-center text-xs ${activeTab === 'calendar' ? 'text-blue-400 font-bold' : 'text-slate-400'}">📅 Календарь</button>
-          <button onclick="activeTab = 'staff'; render();" class="flex flex-col items-center text-xs ${activeTab === 'staff' ? 'text-blue-400 font-bold' : 'text-slate-400'}">👥 Персонал</button>
-          <button onclick="activeTab = 'auto'; render();" class="flex flex-col items-center text-xs ${activeTab === 'auto' ? 'text-blue-400 font-bold' : 'text-slate-400'}">⚡ Авто-ИИ</button>
+        <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-950/80 backdrop-blur-xl border-t border-slate-800/80 px-6 py-3 flex justify-around items-center z-40 pb-7">
+          <button onclick="activeTab = 'calendar'; render();" class="flex flex-col items-center gap-1 text-[11px] font-bold transition active:scale-90 ${activeTab === 'calendar' ? 'text-blue-400' : 'text-slate-500'}">
+            <span class="text-lg">📅</span> Календарь
+          </button>
+          <button onclick="activeTab = 'staff'; render();" class="flex flex-col items-center gap-1 text-[11px] font-bold transition active:scale-90 ${activeTab === 'staff' ? 'text-blue-400' : 'text-slate-500'}">
+            <span class="text-lg">👥</span> Персонал
+          </button>
+          <button onclick="activeTab = 'auto'; render();" class="flex flex-col items-center gap-1 text-[11px] font-bold transition active:scale-90 ${activeTab === 'auto' ? 'text-blue-400' : 'text-slate-500'}">
+            <span class="text-lg">⚡</span> Авто-ИИ
+          </button>
         </nav>
       `;
 
@@ -223,6 +368,11 @@
 
     function changeMonth(delta) {
       currentDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + delta, 1);
+      render();
+    }
+
+    function toggleOffDutyGrid() {
+      showOffDutyOnGrid = !showOffDutyOnGrid;
       render();
     }
 
